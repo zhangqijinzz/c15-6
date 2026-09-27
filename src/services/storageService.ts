@@ -1,4 +1,4 @@
-import type { EnergyDocument } from '../types';
+import type { DeviceGroup, EnergyDocument } from '../types';
 
 const STORAGE_KEY = 'energy-lens.document.v1';
 
@@ -42,7 +42,14 @@ function isScenario(value: unknown): value is EnergyDocument['scenarios'][number
     && scenario.daysPerMonth <= 31
     && Array.isArray(scenario.devices)
     && scenario.devices.length > 0
-    && scenario.devices.every(isDevice);
+    && scenario.devices.every(isDevice)
+    && (scenario.groups === undefined || (Array.isArray(scenario.groups) && scenario.groups.every(isGroup)));
+}
+
+function isGroup(value: unknown): value is DeviceGroup {
+  if (!value || typeof value !== 'object') return false;
+  const group = value as Partial<DeviceGroup>;
+  return typeof group.id === 'string' && typeof group.name === 'string';
 }
 
 function isDevice(value: unknown): value is EnergyDocument['scenarios'][number]['devices'][number] {

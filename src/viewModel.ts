@@ -1,4 +1,12 @@
-import { cloneScenario, summarizeScenario, validateDevice, validateScenarioSettings } from './domain';
+import {
+  cloneScenario,
+  DEFAULT_GROUP_ID,
+  normalizeScenario,
+  summarizeScenario,
+  validateDevice,
+  validateGroupName,
+  validateScenarioSettings,
+} from './domain';
 import { findScenario, type EnergyRepository } from './repository';
 import type { EnergyDevice, EnergyDocument, EnergyScenario, Notice, ViewStatus } from './types';
 
@@ -34,7 +42,8 @@ export class EnergyLensViewModel {
 
   get activeScenario(): EnergyScenario | null {
     if (!this.state.document) return null;
-    return findScenario(this.state.document, this.state.document.activeScenarioId) ?? null;
+    const scenario = findScenario(this.state.document, this.state.document.activeScenarioId);
+    return scenario ? normalizeScenario(scenario) : null;
   }
 
   get activeSummary() {
@@ -55,10 +64,11 @@ export class EnergyLensViewModel {
     this.commit((current) => ({ ...current, devices: current.devices.map((item) => item.id === deviceId ? next : item) }), '参数已更新');
   }
 
-  addDevice(): void {
+  addDevice(targetGroupId?: string): void {
     const scenario = this.activeScenario;
     if (!scenario) return;
-    const device: EnergyDevice = { id: `device-${Date.now()}`, name: '新设备', watts: 100, dailyHours: 1 };
+    const groupId = scenario.groups?.some((group) => group.id === targetGroupId) ? targetGroupId : DEFAULT_GROUP_ID;
+    const device: EnergyDevice = { id: `device-${Date.now()}`, name: '新设备', watts: 100, dailyHours: 1, groupId };
     this.commit((current) => ({ ...current, devices: [...current.devices, device] }), '已添加设备，可继续修改参数');
   }
 
@@ -69,6 +79,64 @@ export class EnergyLensViewModel {
       return;
     }
     this.commit((current) => ({ ...current, devices: current.devices.filter((item) => item.id !== deviceId) }), '设备已移除');
+  }
+
+  assignDevice(deviceId: string, groupId: string): void {
+    const scenario = this.activeScenario;
+    if (!scenario) return;
+    if (!scenario.groups?.some((group) => group.id === groupId)) return;
+    this.commit((current) => ({
+      ...current,
+      devices: current.devices.map((item) => (item.id === deviceId ? { ...item, groupId } : item)),
+    }), `已归入「${scenario.groups.find((group) => group.id === groupId)?.name ?? ''}」`);
+  }
+
+  addGroup(name: string): boolean {
+    const scenario = this.activeScenario;
+    if (!scenario) return false;
+    const trimmed = name.trim();
+    const error = validateGroupName(trimmed);
+    if (error) {
+      this.setNotice({ kind: 'error', text: error });
+      return false;
+    }
+    const group = { id: `group-${Date.now()}`, name: trimmed };
+    this.commit((current) => ({ ...current, groups: [...(current.groups ?? []), group] }), `已创建分组「${trimmed}」`);
+    return true;
+  }
+
+  renameGroup(groupId: string, name: string): boolean {
+    const scenario = this.activeScenario;
+    if (!scenario) return false;
+    if (groupId === DEFAULT_GROUP_ID) return false;
+    const trimmed = name.trim();
+    const error = validateGroupName(trimmed);
+    if (error) {
+      this.setNotice({ kind: 'error', text: error });
+      return false;
+    }
+    this.commit((current) => ({
+      ...current,
+      groups: (current.groups ?? []).map((group) => (group.id === groupId ? { ...group, name: trimmed } : group)),
+    }), '分组已重命名');
+    return true;
+  }
+
+  removeGroup(groupId: string): void {
+    const scenario = this.activeScenario;
+    if (!scenario) return;
+    if (groupId === DEFAULT_GROUP_ID) {
+      this.setNotice({ kind: 'info', text: '默认组用于收留未归组的设备，不能删除' });
+      return;
+    }
+    const group = scenario.groups?.find((item) => item.id === groupId);
+    if (!group) return;
+    // 删除前先把组内设备迁回默认组，保证任何设备都不会丢掉归属
+    this.commit((current) => ({
+      ...current,
+      groups: (current.groups ?? []).filter((item) => item.id !== groupId),
+      devices: current.devices.map((device) => (device.groupId === groupId ? { ...device, groupId: DEFAULT_GROUP_ID } : device)),
+    }), `已删除分组「${group.name}」，组内设备已移至默认组`);
   }
 
   updateSettings(patch: Partial<Pick<EnergyScenario, 'name' | 'pricePerKwh' | 'daysPerMonth'>>): void {
@@ -104,7 +172,7 @@ export class EnergyLensViewModel {
 
   private commit(update: (scenario: EnergyScenario) => EnergyScenario, notice: string): void {
     if (!this.state.document) return;
-    const document = { ...this.state.document, scenarios: this.state.document.scenarios.map((scenario) => scenario.id === this.state.document?.activeScenarioId ? update(scenario) : scenario) };
+    const document = { ...this.state.document, scenarios: this.state.document.scenarios.map((scenario) => scenario.id === this.state.document?.activeScenarioId ? normalizeScenario(update(normalizeScenario(scenario))) : scenario) };
     this.persist(document, notice);
   }
 
