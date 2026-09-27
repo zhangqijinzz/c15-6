@@ -1,6 +1,6 @@
-import { cloneScenario, summarizeScenario, validateDevice, validateScenarioSettings } from './domain';
+import { cloneScenario, DEFAULT_GROUP_ID, summarizeScenario, validateDevice, validateGroupName, validateScenarioSettings } from './domain';
 import { findScenario, type EnergyRepository } from './repository';
-import type { EnergyDevice, EnergyDocument, EnergyScenario, Notice, ViewStatus } from './types';
+import type { DeviceGroup, EnergyDevice, EnergyDocument, EnergyScenario, Notice, ViewStatus } from './types';
 
 export interface EnergyLensState {
   document: EnergyDocument | null;
@@ -58,7 +58,7 @@ export class EnergyLensViewModel {
   addDevice(): void {
     const scenario = this.activeScenario;
     if (!scenario) return;
-    const device: EnergyDevice = { id: `device-${Date.now()}`, name: '新设备', watts: 100, dailyHours: 1 };
+    const device: EnergyDevice = { id: `device-${Date.now()}`, name: '新设备', watts: 100, dailyHours: 1, groupId: DEFAULT_GROUP_ID };
     this.commit((current) => ({ ...current, devices: [...current.devices, device] }), '已添加设备，可继续修改参数');
   }
 
@@ -69,6 +69,55 @@ export class EnergyLensViewModel {
       return;
     }
     this.commit((current) => ({ ...current, devices: current.devices.filter((item) => item.id !== deviceId) }), '设备已移除');
+  }
+
+  addGroup(): void {
+    const scenario = this.activeScenario;
+    if (!scenario) return;
+    const groups = scenario.groups ?? [];
+    let index = groups.length + 1;
+    let name = `分组 ${index}`;
+    while (groups.some((group) => group.name === name)) {
+      index += 1;
+      name = `分组 ${index}`;
+    }
+    const group: DeviceGroup = { id: `group-${Date.now()}`, name };
+    this.commit((current) => ({ ...current, groups: [...(current.groups ?? []), group] }), `已创建「${name}」，可以把设备归进去了`);
+  }
+
+  renameGroup(groupId: string, name: string): void {
+    const scenario = this.activeScenario;
+    if (!scenario) return;
+    const groups = scenario.groups ?? [];
+    if (!groups.some((group) => group.id === groupId)) return;
+    const error = validateGroupName(name, groups, groupId);
+    if (error) {
+      this.setNotice({ kind: 'error', text: error });
+      return;
+    }
+    this.commit((current) => ({ ...current, groups: (current.groups ?? []).map((group) => group.id === groupId ? { ...group, name: name.trim() } : group) }), '分组已重命名');
+  }
+
+  removeGroup(groupId: string): void {
+    const scenario = this.activeScenario;
+    if (!scenario) return;
+    if (groupId === DEFAULT_GROUP_ID) {
+      this.setNotice({ kind: 'info', text: '默认分组用于承接未归组设备，不能删除' });
+      return;
+    }
+    this.commit((current) => ({
+      ...current,
+      groups: (current.groups ?? []).filter((group) => group.id !== groupId),
+      devices: current.devices.map((device) => device.groupId === groupId ? { ...device, groupId: DEFAULT_GROUP_ID } : device),
+    }), '分组已删除，组内设备已归入默认分组');
+  }
+
+  assignDeviceToGroup(deviceId: string, groupId: string): void {
+    const scenario = this.activeScenario;
+    if (!scenario) return;
+    const known = new Set((scenario.groups ?? []).map((group) => group.id));
+    const target = known.has(groupId) ? groupId : DEFAULT_GROUP_ID;
+    this.commit((current) => ({ ...current, devices: current.devices.map((device) => device.id === deviceId ? { ...device, groupId: target } : device) }), '设备已归入分组');
   }
 
   updateSettings(patch: Partial<Pick<EnergyScenario, 'name' | 'pricePerKwh' | 'daysPerMonth'>>): void {

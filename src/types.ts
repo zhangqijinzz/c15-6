@@ -1,8 +1,14 @@
+export interface DeviceGroup {
+  id: string;
+  name: string;
+}
+
 export interface EnergyDevice {
   id: string;
   name: string;
   watts: number;
   dailyHours: number;
+  groupId?: string;
 }
 
 export interface EnergyScenario {
@@ -11,6 +17,7 @@ export interface EnergyScenario {
   pricePerKwh: number;
   daysPerMonth: number;
   devices: EnergyDevice[];
+  groups?: DeviceGroup[];
   createdAt: string;
 }
 
@@ -33,7 +40,21 @@ export interface EnergyEstimate {
   monthlyCost: number;
 }
 
+export interface DeviceSummary extends EnergyDevice, EnergyEstimate {
+  groupId: string;
+  share: number;
+  groupShare: number;
+}
+
+export interface GroupSummary extends EnergyEstimate {
+  id: string;
+  name: string;
+  share: number;
+  devices: DeviceSummary[];
+}
+
 export interface ScenarioSummary {
   total: EnergyEstimate;
-  devices: Array<EnergyDevice & EnergyEstimate & { share: number }>;
+  devices: DeviceSummary[];
+  groups: GroupSummary[];
 }
